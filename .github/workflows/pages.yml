@@ -27,13 +27,43 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
       - name: Configure GitHub Pages
+        id: pages
         uses: actions/configure-pages@v5
         with:
           enablement: true
+      - name: Prepare site for GitHub Pages
+        env:
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          mkdir _site
+          rsync -a --exclude=.git --exclude=.github --exclude=.vscode --exclude=_site ./ _site/
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          base_path = os.environ["BASE_PATH"].rstrip("/")
+          if not base_path:
+              raise SystemExit(0)
+
+          html_url = re.compile(r"""(?i)(\b(?:href|src|action|poster)\s*=\s*["'])/(?!/)""")
+          manifest_url = re.compile(r"""(?i)("(?:start_url|src)"\s*:\s*")/(?!/)""")
+          for file in Path("_site").rglob("*"):
+              if not file.is_file() or file.suffix.lower() not in {".html", ".webmanifest"}:
+                  continue
+              content = file.read_text(encoding="utf-8")
+              if file.suffix.lower() == ".html":
+                  content = html_url.sub(lambda match: match.group(1) + base_path + "/", content)
+              elif file.name == "site.webmanifest":
+                  content = manifest_url.sub(lambda match: match.group(1) + base_path + "/", content)
+              else:
+                  continue
+              file.write_text(content, encoding="utf-8")
+          PY
       - name: Upload site files
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
       - name: Deploy site
         id: deployment
         uses: actions/deploy-pages@v4
